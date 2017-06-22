@@ -1,0 +1,7 @@
+"0","train <- read_csv(""./data/train.csv"")"
+"0","IdTrain <- train$Id"
+"0","YTrain <- train$Target"
+"0","XTrain <- train %>% dplyr::select(-Id, -Target)"
+"0","test <- read_csv(""./data/test.csv"")"
+"0","IdTest <- test$Id"
+"0","XTest <- test %>% dplyr::select(-Id)"

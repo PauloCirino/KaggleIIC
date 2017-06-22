@@ -1,0 +1,303 @@
+---
+title: "Exemplo de Manipulação de Dados"
+author: "Paulo Cirino Ribeiro"
+date: "2017-5-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 10, fig.align = 'center')
+```
+
+## Os Pacotes
+```{r packageLoading, message = FALSE, warning = FALSE}
+### Reading Data
+require('readr')
+
+### Data Wrangling
+require('dplyr')
+require('tidyr')
+require('tibble')
+require('DMwR') ## KNN Imputation
+
+### Visualization
+require('ggplot2')
+require('Amelia')
+require('plotly')
+```
+
+## Os Dados
+```{r dataReading, warning = FALSE, message = FALSE}
+train <- read_csv("./data/train.csv")
+IdTrain <- train$Id
+YTrain <- train$Target
+XTrain <- train %>% dplyr::select(-Id, -Target)
+
+test <- read_csv("./data/test.csv")
+IdTest <- test$Id
+XTest <- test %>% dplyr::select(-Id)
+```
+
+## Summaries
+```{r dataFirstViewInput, warning = FALSE, message = FALSE}
+XTrain %>% dplyr::glimpse()
+XTrain %>% summary()
+```
+
+
+## Saida
+```{r dataFirstViewOutput, warning = FALSE, message = FALSE}
+YTrain %>% summary()
+
+plotly::plot_ly(x = YTrain) %>%
+  plotly::add_histogram()
+
+plotly::plot_ly(y = YTrain, type = "box", boxpoints = "all", jitter = 0.5,
+        pointpos = -1.8) 
+
+plotly::plot_ly(x = 1:length(YTrain), y = sort(YTrain)) %>%
+  plotly::add_lines() %>%
+  plotly::add_markers()
+
+```
+
+#### Análise
+##### Problemas na Entrada
+- NAs
+- Dados Fora de Escala e de Distribuições Desbalanceadas
+- Grande Número de Variáveis
+- Desconhecimento das Relações e Interações entre variáveis e saida
+
+##### Problemas na Saida
+- Saída não linear
+
+##### Possíveis Pré-Processamentos
+###### NAs
+- Binarização de NAs
+- Substituição de NAs pela média
+- Substituição de NAs pela mediana
+- Substituição de NAs por moda
+- Substituição de NAs por valores extremos 
+
+###### Dados Fora de Escala e de Distribuições Desbalanceadas
+- Normalização dos Dados
+- Escalamento dos Dados
+- Transformações Logarítimicas
+- Transformações de dados contínuos para bins
+
+###### Grande Número de Variáveis
+- PCA para variáveis contínuas
+
+###### Desconhecimento das Relações e Interações entre variáveis e saida
+- Análise de Correlação
+- Relações não-Lineares entre entrada e saida 
+
+## Pré-Processamentos
+### Variáveis com NAs
+
+##### Quais são as variáveis e quanto de NAs elas possuem
+```{r}
+trainMissingData <- XTrain %>% 
+                      dplyr::mutate_all(is.na) %>%
+                      dplyr::summarise_all(dplyr::funs(sum)) %>%
+                      tidyr::gather(Var, NaCountTrain) %>%
+                      dplyr::arrange(dplyr::desc(NaCountTrain)) %>%
+                      dplyr::filter(NaCountTrain > 0)
+
+testMissingData <- XTest %>% 
+                    dplyr::mutate_all(is.na) %>%
+                    dplyr::summarise_all(sum) %>%
+                    tidyr::gather(Var, NaCountTest) %>%
+                    dplyr::arrange(dplyr::desc(NaCountTest)) %>%
+                    dplyr::filter(NaCountTest > 0)
+
+nTrainningObs <- nrow(XTrain)
+nTestObs <- nrow(XTest)
+missingResultTable <- trainMissingData %>%
+  dplyr::full_join(testMissingData, by = 'Var') %>%
+  dplyr::mutate(NaCountTrainPerc = 100 * round(NaCountTrain / nTrainningObs, 4),
+                NaCountTestPerc = 100 * round(NaCountTest / nTestObs, 4))
+missingResultTable
+```
+
+##### Vizualizando relação entre NAs
+```{r vizMissingData, fig.height = 12}
+missingDataColNames <- missingResultTable$Var
+XTrain %>% 
+    dplyr::select( dplyr::one_of(missingDataColNames) ) %>%
+    data.frame() %>%
+    Amelia::missmap(col = c("black", "grey"))
+
+XTest %>% 
+    dplyr::select( dplyr::one_of(missingDataColNames) ) %>%
+    data.frame() %>%
+    Amelia::missmap(col = c("black", "grey"))
+```
+
+##### Vizualizando Disperção entre Valores não NAs
+```{r vizMissingData2}
+missingDataColNames <- missingResultTable$Var[1:6]
+p <- XTrain %>% 
+        dplyr::select( dplyr::one_of(missingDataColNames) ) %>%
+        tidyr::gather(Var, Val) %>%
+        dplyr::filter(!is.na(Val)) %>%
+        dplyr::group_by(Var) %>%
+        dplyr::mutate(Val = (Val - mean(Val))/sd(Val) ) %>%
+        dplyr::ungroup() %>%
+        ggplot2::ggplot(aes(x = Var, fill = Var, color = Var, y = Val))
+plotly::ggplotly(p + ggplot2::geom_boxplot())
+plotly::ggplotly(p + ggplot2::geom_point())
+
+p <- XTest %>% 
+        dplyr::select( dplyr::one_of(missingDataColNames) ) %>%
+        tidyr::gather(Var, Val) %>%
+        dplyr::filter(!is.na(Val)) %>%
+        dplyr::group_by(Var) %>%
+        dplyr::mutate(Val = (Val - mean(Val))/sd(Val) ) %>%
+        dplyr::ungroup() %>%
+        ggplot2::ggplot(aes(x = Var, fill = Var, color = Var, y = Val))
+plotly::ggplotly(p + ggplot2::geom_boxplot())
+plotly::ggplotly(p + ggplot2::geom_point())
+```
+
+##### preProcessNAs 
+```{r}
+NAToZeroVars <- missingResultTable %>%
+    dplyr::filter(NaCountTrainPerc > 20.0) %>%
+    dplyr::select(Var) %>%
+    unlist() %>% as.character()
+
+NNImputationVars <- missingResultTable %>%
+    dplyr::filter(NaCountTrainPerc < 20.0) %>%
+    dplyr::select(Var) %>%
+    unlist() %>% as.character()
+
+
+preProcessNAs <- function(Data, NAToZeroVars, NNImputationVars){
+    auxColNames <- names(Data) %>% base::setdiff( c(NAToZeroVars, NNImputationVars ) ) 
+    auxData <- Data %>% 
+        dplyr::select_( .dots = auxColNames )
+                     
+    NAToZeroData <- Data %>%
+        dplyr::select_(.dots = NAToZeroVars) %>%
+        dplyr::mutate_all( dplyr::funs( ifelse(is.na(.), 0, .) ) 
+                          )
+    NNImputationData <- Data %>%
+        dplyr::select_(.dots = NNImputationVars) %>%
+        data.frame() %>%
+        DMwR::knnImputation(k = 10)
+    
+    dplyr::bind_cols(auxData, NAToZeroData, NNImputationData) %>%
+        data.frame()
+}
+
+XTrain <- XTrain %>%
+            preProcessNAs(NAToZeroVars = NAToZeroVars, NNImputationVars = NNImputationVars)
+XTest <- XTest %>% 
+            preProcessNAs(NAToZeroVars = NAToZeroVars, NNImputationVars = NNImputationVars)
+```
+
+
+### Tipos e Distribuições das Variaveis
+#### Tipo Dos Dados
+
+##### Plot Valores Únicos
+```{r}
+p <- XTrain %>%
+        tidyr::gather(key = Var, value = Val) %>%
+        dplyr::group_by(Var) %>%
+        dplyr::mutate(Val = ( Val - min(Val) ) / ( max(Val) - min(Val) ) ) %>%
+        dplyr::ungroup() %>%
+        data.frame() %>%
+        ggplot2::ggplot(aes(x = Var, y = Val)) +
+        ggplot2::geom_point()
+p
+```
+
+##### Tabela de Valores Únicos
+```{r}
+XTrain %>%
+    tidyr::gather(key = Var, value = Val) %>%
+    unique() %>%
+    dplyr::group_by(Var) %>%
+    dplyr::summarise(UniqueValuesCount = n()) %>%
+    dplyr::arrange(UniqueValuesCount) %>%
+    data.frame()
+```
+
+```{r}
+XTrain <- XTrain %>% dplyr::select(-V37)
+XTest <- XTest %>% dplyr::select(-V37)
+```
+
+
+##### Distribuições dos Dados
+
+```{r, fig.height = 15 }
+p <- XTrain %>%
+        tidyr::gather(key = Var, value = Val) %>%
+        dplyr::group_by(Var) %>%
+        dplyr::mutate(Val = ( Val - min(Val) ) / ( max(Val) - min(Val) ) ) %>%
+        dplyr::ungroup() %>%
+        data.frame() %>%
+        ggplot2::ggplot(aes(x = Var, y = Val)) +
+        ggplot2::geom_boxplot() + 
+        ggplot2::coord_flip()
+p
+```
+
+##### Colocando os Dados em Escala
+##### preProcessScaleAndCenter
+```{r}
+preProcessScaleAndCenter <- function(Data){
+    Data %>% 
+        dplyr::mutate_all( dplyr::funs( ( . - min(.) ) / ( max(.) - min(.) ) ) )
+}
+
+XTrain <- XTrain %>% preProcessScaleAndCenter()
+XTest <- XTest %>% preProcessScaleAndCenter()
+```
+
+##### Diminuindo o Número de Variáveis via PCA
+```{r}
+PCAModel <- prcomp(x = XTrain %>% data.matrix())
+auxPCAData <- summary(PCAModel)$importance %>%
+                t() %>%
+                data.frame() %>%
+                tibble::rownames_to_column(var = "Component") %>%
+                dplyr::mutate(Component = factor(x = Component, 
+                                                 levels = Component %>% as.character()))
+
+p <- auxPCAData %>%
+    ggplot2::ggplot(aes(x = Component, y = Standard.deviation)) +
+    ggplot2::geom_bar(stat = 'identity')
+plotly::ggplotly(p = p)
+
+p <- auxPCAData %>%
+    ggplot2::ggplot(aes(x = Component, y = Proportion.of.Variance)) +
+    ggplot2::geom_bar(stat = 'identity')
+plotly::ggplotly(p = p)
+
+p <- auxPCAData %>%
+    ggplot2::ggplot(aes(x = Component, y = Cumulative.Proportion)) +
+    ggplot2::geom_bar(stat = 'identity')
+plotly::ggplotly(p = p)
+```
+
+##### preProcessPCA
+```{r}
+preProcessPCA <- function(Data, PCAModel, nComponents){
+    predict(object = PCAModel, newdata = Data) %>%
+        data.frame() %>%
+        dplyr::select(1:nComponents)
+}
+XTrain <- XTrain %>% preProcessPCA(PCAModel = PCAModel, nComponents = 45)
+XTest <- XTest %>% preProcessPCA(PCAModel = PCAModel, nComponents = 45)
+```
+
+### Salvando Dados de Teste e Treinamento Processados
+```{r}
+readr::write_csv(x = XTrain, path = 'data/processedTrainData.csv')
+readr::write_csv(x = XTest, path = 'data/processedTestData.csv')
+readr::write_csv(x = YTrain %>% data.frame(), path = 'data/TrainLabels.csv')
+```
