@@ -13,11 +13,11 @@ nfold <- 30
 objective <- "reg:linear"
 metrics <- "rmse"
 silent <- 0
-nthread <- 1
-eta <- c(0.2, 0.1, 0.05, 0.01)
-min_child_weight <- c(1, 2, 5, 10, 20, 25)
-max_depth <- c(2, 4, 6, 8, 10)
-gamma <- c(0, 2, 5, 10)
+nthread <- 6
+eta <- c(0.1, 0.05, 0.01)
+min_child_weight <- c(2, 5, 10)
+max_depth <- c(2, 4, 6)
+gamma <- c(0, 2)
 max_delta_step <- c(0) 
 subsample <- c(0.5, 0.75, 1)
 colsample_bytree <- c(0.5, 0.75, 1)

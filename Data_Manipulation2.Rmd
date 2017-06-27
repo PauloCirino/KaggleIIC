@@ -24,6 +24,8 @@ library('DMwR') ## KNN Imputation
 library('ggplot2')
 library('Amelia')
 library('plotly')
+library('corrplot')
+library('ggfortify')
 ```
 
 ## Os Dados
@@ -258,6 +260,81 @@ XTrain <- XTrain %>% preProcessScaleAndCenter()
 XTest <- XTest %>% preProcessScaleAndCenter()
 ```
 
+##### Análise de Correlação
+```{r}
+M <- cor(x = XTrain, y = YTrain)
+auxTable <- M %>% data.frame() %>% tibble::rownames_to_column()
+
+colnames(auxTable) <- c('Var', 'Val')
+auxTable$Var <- factor(x = auxTable$Var,
+                       levels = auxTable$Var[order(auxTable$Val)])
+
+p <- ggplot2::ggplot(data = auxTable) +
+        ggplot2::geom_bar(aes(x = Var, y = Val), stat = 'identity')
+plotly::ggplotly(p = p)
+```
+
+
+```{r}
+auxXTrain <- XTrain %>%
+    dplyr::mutate_all(dplyr::funs(squard = (. ** 2),
+                                  third =  (. ** 2),
+                                  sqrt =  sqrt(.),
+                                  log = log(.) )
+                      )
+
+M <- cor(x = auxXTrain, y = YTrain)
+auxTable <- M %>%
+                data.frame() %>%
+                tibble::rownames_to_column()
+
+colnames(auxTable) <- c('Var', 'Val')
+originalVars <- sapply(X = as.character(auxTable$Var),
+                       FUN = function(x){
+                           strsplit(x = x, split = '_')[[1]][1]
+                       })
+
+auxTable$originalVars <- originalVars
+
+auxTable <- auxTable %>%
+    dplyr::group_by(originalVars) %>%
+    dplyr::filter( Val == max(Val, na.rm = TRUE) ) %>%
+    dplyr::filter(1:n() == 1) %>%
+    dplyr::ungroup()
+
+auxTable$Var <- factor(x = auxTable$Var,
+                       levels = auxTable$Var[order(auxTable$Val)])
+
+
+BESTVARS <- auxTable %>%
+    dplyr::mutate( absCor = abs(Val) ) %>%
+    dplyr::filter(Val >= 0.1) %>%
+    dplyr::select(Var) %>% 
+    unlist() %>% as.character()
+
+p <- ggplot2::ggplot(data = auxTable) +
+        ggplot2::geom_bar(aes(x = Var, y = Val), stat = 'identity')
+plotly::ggplotly(p = p)
+```
+
+##### preProcessSelectCorreletedVariables
+```{r}
+preProcessSelectCorreletedVariables <- function(Data, bestVars){
+    auxData <- Data %>%
+                dplyr::mutate_all(dplyr::funs(squard = (. ** 2),
+                                              third =  (. ** 2),
+                                              sqrt =  sqrt(.),
+                                              log = log(.) )
+                )
+    
+    auxData[, colnames(auxData) %in% bestVars]
+    
+}
+
+XTrain <- XTrain %>% preProcessSelectCorreletedVariables(bestVars = BESTVARS)
+XTest <- XTest %>% preProcessSelectCorreletedVariables(bestVars = BESTVARS)
+```
+
 ##### Diminuindo o Número de Variáveis via PCA
 ```{r}
 PCAModel <- prcomp(x = XTrain %>% data.matrix())
@@ -291,8 +368,20 @@ preProcessPCA <- function(Data, PCAModel, nComponents){
         data.frame() %>%
         dplyr::select(1:nComponents)
 }
-XTrain <- XTrain %>% preProcessPCA(PCAModel = PCAModel, nComponents = 45)
-XTest <- XTest %>% preProcessPCA(PCAModel = PCAModel, nComponents = 45)
+XTrain <- XTrain %>% preProcessPCA(PCAModel = PCAModel, nComponents = 25)
+XTest <- XTest %>% preProcessPCA(PCAModel = PCAModel, nComponents = 25)
+```
+
+### Fazendo Uma Regressão Simples
+```{r}
+LinearRegressionData <- cbind(Y = YTrain, XTrain)
+linearModel <- lm(Y ~ ., data = LinearRegressionData)
+summary(linearModel)
+p <- ggplot2::autoplot(linearModel)
+plotly::ggplotly(p = p[[1]])
+plotly::ggplotly(p = p[[2]])
+p[[3]]
+plotly::ggplotly(p = p[[4]])
 ```
 
 ### Salvando Dados de Teste e Treinamento Processados
@@ -300,4 +389,12 @@ XTest <- XTest %>% preProcessPCA(PCAModel = PCAModel, nComponents = 45)
 readr::write_csv(x = XTrain, path = 'data/processedTrainData.csv')
 readr::write_csv(x = XTest, path = 'data/processedTestData.csv')
 readr::write_csv(x = YTrain %>% data.frame(), path = 'data/TrainLabels.csv')
+```
+
+### Estimando Teste
+```{r}
+YHatTest <- predict(linearModel, XTest)
+SubmissionData <- readr::read_csv(file = 'data/SampleSubmission.csv')
+SubmissionData$Target <- YHatTest
+readr::write_csv(x = SubmissionData, path = 'data/LinearRegressionModel.csv')
 ```

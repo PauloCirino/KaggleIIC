@@ -58,7 +58,7 @@ params <- list(booster = booster$booster,
 
 model <- xgb.train( params = params,
                     data = trainData,
-                    nrounds = 7500,
+                    nrounds = 1000,
                     metrics = "RMSE",
                     maximize = FALSE)
 
